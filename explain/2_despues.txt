@@ -1,0 +1,123 @@
+-- CONSULTA 1: Ventas totales por Cadena y Año. (Join + Group By + Sort)
+EXPLAIN ANALYZE
+SELECT
+    t.nombre_tienda,
+    f.anio,
+    SUM(v.monto_total) AS ventas_totales,
+    COUNT(*) AS num_transacciones
+FROM fact_ventas v
+JOIN dim_tienda t ON v.tienda_sk = t.tienda_sk
+JOIN dim_fecha f ON v.fecha_sk = f.fecha_sk
+GROUP BY t.nombre_tienda, f.anio
+ORDER BY ventas_totales DESC;
+
+Name       | Value                                                                                             |
+-----------+---------------------------------------------------------------------------------------------------+
+QUERY PLAN | Sort  (cost=9075.83..9079.73 rows=1560 width=68) (actual time=170.179..171.153 rows=1560 loops=1) |
+
+QUERY PLAN                                                                                                                                                       |
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------+
+Sort  (cost=9075.83..9079.73 rows=1560 width=68) (actual time=170.179..171.153 rows=1560 loops=1)                                                                |
+  Sort Key: (sum(v.monto_total)) DESC                                                                                                                            |
+  Sort Method: quicksort  Memory: 150kB                                                                                                                          |
+  ->  Finalize HashAggregate  (cost=8973.59..8993.09 rows=1560 width=68) (actual time=169.088..170.573 rows=1560 loops=1)                                        |
+        Group Key: t.nombre_tienda, f.anio                                                                                                                       |
+        Batches: 1  Memory Usage: 1089kB                                                                                                                         |
+        ->  Gather  (cost=8603.09..8934.59 rows=3120 width=68) (actual time=160.459..166.977 rows=4680 loops=1)                                                  |
+              Workers Planned: 2                                                                                                                                 |
+              Workers Launched: 2                                                                                                                                |
+              ->  Partial HashAggregate  (cost=7603.09..7622.59 rows=1560 width=68) (actual time=151.767..152.446 rows=1560 loops=3)                             |
+                    Group Key: t.nombre_tienda, f.anio                                                                                                           |
+                    Batches: 1  Memory Usage: 833kB                                                                                                              |
+                    Worker 0:  Batches: 1  Memory Usage: 833kB                                                                                                   |
+                    Worker 1:  Batches: 1  Memory Usage: 833kB                                                                                                   |
+                    ->  Hash Join  (cost=78.07..6233.09 rows=137000 width=35) (actual time=0.747..84.383 rows=109600 loops=3)                                    |
+                          Hash Cond: (v.fecha_sk = f.fecha_sk)                                                                                                   |
+                          ->  Hash Join  (cost=10.75..5805.46 rows=137000 width=37) (actual time=0.137..53.630 rows=109600 loops=3)                              |
+                                Hash Cond: (v.tienda_sk = t.tienda_sk)                                                                                           |
+                                ->  Parallel Seq Scan on fact_ventas v  (cost=0.00..5430.00 rows=137000 width=15) (actual time=0.007..13.246 rows=109600 loops=3)|
+                                ->  Hash  (cost=7.00..7.00 rows=300 width=30) (actual time=0.109..0.110 rows=300 loops=3)                                        |
+                                      Buckets: 1024  Batches: 1  Memory Usage: 27kB                                                                              |
+                                      ->  Seq Scan on dim_tienda t  (cost=0.00..7.00 rows=300 width=30) (actual time=0.018..0.060 rows=300 loops=3)              |
+                          ->  Hash  (cost=39.92..39.92 rows=2192 width=6) (actual time=0.596..0.596 rows=2192 loops=3)                                           |
+                                Buckets: 4096  Batches: 1  Memory Usage: 118kB                                                                                   |
+                                ->  Seq Scan on dim_fecha f  (cost=0.00..39.92 rows=2192 width=6) (actual time=0.009..0.278 rows=2192 loops=3)                   |
+Planning Time: 3.858 ms                                                                                                                                          |
+Execution Time: 171.297 ms                                                                                                                                       |
+
+
+
+-- CONSULTA 2: Top 5 Productos más vendidos (Join + Sort)
+EXPLAIN ANALYZE
+SELECT
+    p.nombre_producto,
+    p.categoria,
+    p.marca,
+    SUM(v.cantidad) AS unidades_vendidas,
+    SUM(v.monto_total) AS ingresos_totales,
+    COUNT(DISTINCT v.ticket_id) AS num_transacciones
+FROM fact_ventas v
+JOIN dim_producto p ON v.producto_sk = p.producto_sk
+GROUP BY p.producto_sk, p.nombre_producto, p.categoria, p.marca
+ORDER BY unidades_vendidas DESC
+LIMIT 5;
+
+Name       | Value                                                                                          |
+-----------+------------------------------------------------------------------------------------------------+
+QUERY PLAN | Limit  (cost=52739.75..52739.76 rows=5 width=97) (actual time=860.437..860.440 rows=5 loops=1) |
+
+QUERY PLAN                                                                                                                                                                |
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+Limit  (cost=52739.75..52739.76 rows=5 width=97) (actual time=860.437..860.440 rows=5 loops=1)                                                                            |
+  ->  Sort  (cost=52739.75..52740.00 rows=100 width=97) (actual time=860.436..860.438 rows=5 loops=1)                                                                     |
+        Sort Key: (sum(v.cantidad)) DESC                                                                                                                                  |
+        Sort Method: top-N heapsort  Memory: 26kB                                                                                                                         |
+        ->  GroupAggregate  (cost=453.93..52738.08 rows=100 width=97) (actual time=16.425..860.286 rows=100 loops=1)                                                      |
+              Group Key: p.producto_sk                                                                                                                                    |
+              ->  Incremental Sort  (cost=453.93..49448.83 rows=328800 width=73) (actual time=7.742..772.312 rows=328800 loops=1)                                         |
+                    Sort Key: p.producto_sk, v.ticket_id                                                                                                                  |
+                    Presorted Key: p.producto_sk                                                                                                                          |
+                    Full-sort Groups: 100  Sort Method: quicksort  Average Memory: 31kB  Peak Memory: 31kB                                                                |
+                    Pre-sorted Groups: 100  Sort Method: quicksort  Average Memory: 441kB  Peak Memory: 464kB                                                             |
+                    ->  Nested Loop  (cost=0.56..26129.99 rows=328800 width=73) (actual time=0.026..258.514 rows=328800 loops=1)                                          |
+                          ->  Index Scan using dim_producto_pkey on dim_producto p  (cost=0.14..14.64 rows=100 width=49) (actual time=0.004..0.074 rows=100 loops=1)      |
+                          ->  Index Scan using idx_ventas_producto on fact_ventas v  (cost=0.42..228.27 rows=3288 width=28) (actual time=0.009..2.075 rows=3288 loops=100)|
+                                Index Cond: (producto_sk = p.producto_sk)                                                                                                 |
+Planning Time: 0.250 ms                                                                                                                                                   |
+Execution Time: 860.492 ms                                                                                                                                                |
+
+
+
+-- CONSULTA 3: Ticket Promedio por Mes (Count Distinct)
+EXPLAIN ANALYZE
+SELECT
+    f.anio,
+    f.mes,
+    f.nombre_mes,
+    SUM(v.monto_total) AS ventas_totales,
+    COUNT(DISTINCT v.ticket_id) AS num_tickets,
+    ROUND(SUM(v.monto_total) / COUNT(DISTINCT v.ticket_id), 2) AS ticket_promedio
+FROM fact_ventas v
+JOIN dim_fecha f ON v.fecha_sk = f.fecha_sk
+GROUP BY f.anio, f.mes, f.nombre_mes
+ORDER BY f.anio, f.mes;
+
+Name       | Value                                                                                                        |
+-----------+--------------------------------------------------------------------------------------------------------------+
+QUERY PLAN | GroupAggregate  (cost=46277.43..51213.81 rows=219 width=83) (actual time=1081.679..1502.144 rows=72 loops=1) |
+
+QUERY PLAN                                                                                                                            |
+--------------------------------------------------------------------------------------------------------------------------------------+
+GroupAggregate  (cost=46277.43..51213.81 rows=219 width=83) (actual time=1081.679..1502.144 rows=72 loops=1)                          |
+  Group Key: f.anio, f.mes, f.nombre_mes                                                                                              |
+  ->  Sort  (cost=46277.43..47099.43 rows=328800 width=31) (actual time=1075.688..1409.560 rows=328800 loops=1)                       |
+        Sort Key: f.anio, f.mes, f.nombre_mes, v.ticket_id                                                                            |
+        Sort Method: external merge  Disk: 13376kB                                                                                    |
+        ->  Hash Join  (cost=67.32..8280.09 rows=328800 width=31) (actual time=0.648..111.832 rows=328800 loops=1)                    |
+              Hash Cond: (v.fecha_sk = f.fecha_sk)                                                                                    |
+              ->  Seq Scan on fact_ventas v  (cost=0.00..7348.00 rows=328800 width=24) (actual time=0.009..23.515 rows=328800 loops=1)|
+              ->  Hash  (cost=39.92..39.92 rows=2192 width=15) (actual time=0.632..0.633 rows=2192 loops=1)                           |
+                    Buckets: 4096  Batches: 1  Memory Usage: 137kB                                                                    |
+                    ->  Seq Scan on dim_fecha f  (cost=0.00..39.92 rows=2192 width=15) (actual time=0.005..0.283 rows=2192 loops=1)   |
+Planning Time: 0.273 ms                                                                                                               |
+Execution Time: 1505.021 ms                                                                                                           |
